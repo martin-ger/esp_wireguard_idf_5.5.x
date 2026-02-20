@@ -1,5 +1,5 @@
 ---
-version: "0.9.0a"
+version: "0.9.1"
 description: WireGuard Implementation for ESP-IDF
 url: https://github.com/martin-ger/esp_wireguard_idf_5.5.x
 license: BSD-3-Clause
