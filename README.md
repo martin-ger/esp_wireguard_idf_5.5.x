@@ -1,5 +1,7 @@
 # `esp_wireguard`, WireGuard Implementation for ESP-IDF
 
+** Added Hack to get it to work on ESP IDF 5.5.x **
+
 This is an implementation of the [WireGuard&reg;](https://www.wireguard.com/)
 for ESP-IDF, based on
 [WireGuard Implementation for lwIP](https://github.com/smartalock/wireguard-lwip).

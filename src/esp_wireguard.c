@@ -33,6 +33,8 @@
 #include <string.h>
 #include <inttypes.h>
 #include <lwip/ip.h>
+#include <lwip/pbuf.h>
+#include <lwip/netif.h>
 #include <lwip/netdb.h>
 #include <lwip/err.h>
 #include <esp_err.h>
@@ -150,13 +152,18 @@ fail:
     return err;
 }
 
+static err_t wg_ip_input(struct pbuf *p, struct netif *inp) {
+    return ip_input(p, inp);
+}
+
 static esp_err_t esp_wireguard_netif_create(const wireguard_config_t *config)
 {
     esp_err_t err;
     ip_addr_t ip_addr;
     ip_addr_t netmask;
     ip_addr_t gateway = IPADDR4_INIT_BYTES(0, 0, 0, 0);
-    struct wireguardif_init_data wg = {0};
+    static struct wireguardif_init_data wg;
+    memset(&wg, 0, sizeof(wg));
 
     if (!config) {
         err = ESP_ERR_INVALID_ARG;
@@ -181,23 +188,38 @@ static esp_err_t esp_wireguard_netif_create(const wireguard_config_t *config)
         goto fail;
     }
 
+    /* Pass IP4_ADDR_ANY4 for IPs to prevent netif_set_addr being called during netif_add
+       with actual IPs, which would trigger the problematic ESP-IDF callback.
+       We must also temporarily clear netif->state during any operation that
+       triggers the ESP-IDF global callback (like setting IP or bringing up),
+       because ESP-IDF misinterprets netif->state as an esp_netif_t handle. */
     /* Register the new WireGuard network interface with lwIP */
     wg_netif = netif_add(
             &wg_netif_struct,
-            ip_2_ip4(&ip_addr),
-            ip_2_ip4(&netmask),
-            ip_2_ip4(&gateway),
+            IP4_ADDR_ANY4,
+            IP4_ADDR_ANY4,
+            IP4_ADDR_ANY4,
             &wg, &wireguardif_init,
-            &ip_input);
+            &wg_ip_input);
     if (wg_netif == NULL) {
         ESP_LOGE(TAG, "netif_add: failed");
         err = ESP_FAIL;
         goto fail;
     }
 
-    /* Mark the interface as administratively up, link up flag is set
-     * automatically when peer connects */
+    /* Save the device pointer (which was set by wireguardif_init into netif->state) */
+    void *device = wg_netif->state;
+
+    /* Temporarily hide it from the ESP-IDF callback */
+    wg_netif->state = NULL;
+
+    /* Now set the IP address and bring it up safely */
+    netif_set_addr(wg_netif, ip_2_ip4(&ip_addr), ip_2_ip4(&netmask), ip_2_ip4(&gateway));
     netif_set_up(wg_netif);
+
+    /* Restore the device pointer so WireGuard can actually function */
+    wg_netif->state = device;
+
     err = ESP_OK;
 fail:
     return err;
@@ -301,7 +323,10 @@ esp_err_t esp_wireguard_disconnect(wireguard_ctx_t *ctx)
 
     // Clear the IP address to gracefully disconnect any clients while the
     // peers are still valid
+    void *device = ctx->netif->state;
+    ctx->netif->state = NULL;
     netif_set_ipaddr(ctx->netif, IP4_ADDR_ANY4);
+    ctx->netif->state = device;
 
     lwip_err = wireguardif_disconnect(ctx->netif, wireguard_peer_index);
     if (lwip_err != ERR_OK) {
