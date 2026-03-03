@@ -54,6 +54,8 @@ struct wireguardif_init_data {
 	u16_t listen_port;
 	// Optional: restrict send/receive of encapsulated WireGuard traffic to this network interface only (NULL to use routing table)
 	struct netif *bind_netif;
+	// Optional: esp_netif interface key for the underlying netif (e.g. "WIFI_STA_DEF", "ETH_DEF"). NULL defaults to "WIFI_STA_DEF".
+	const char *netif_key;
 };
 
 struct wireguardif_peer {
