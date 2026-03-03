@@ -50,6 +50,7 @@ extern "C" {
     .endpoint = NULL, \
     .port = 51820, \
     .persistent_keepalive = 0, \
+    .netif_key = NULL, \
 }
 
 typedef struct {
@@ -68,6 +69,8 @@ typedef struct {
                                              authenticated empty packet to the peer for the purpose of keeping a stateful
                                              firewall or NAT mapping valid persistently. Set zero to disable the feature.
                                              Default is zero. */
+    const char* netif_key;             /**< esp_netif interface key for the underlying network interface
+                                             (e.g. "WIFI_STA_DEF" or "ETH_DEF"). NULL defaults to "WIFI_STA_DEF". */
 } wireguard_config_t;
 
 typedef struct {
