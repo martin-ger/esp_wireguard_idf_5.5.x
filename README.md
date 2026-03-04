@@ -1,6 +1,8 @@
 # `esp_wireguard`, WireGuard Implementation for ESP-IDF
 
-** Added Hack to get it to work on ESP IDF 5.5.x **
+**Added hack to get it to work on ESP IDF 5.5.x**
+
+**Added option to select other interfaces than WIFI_STA**
 
 This is an implementation of the [WireGuard&reg;](https://www.wireguard.com/)
 for ESP-IDF, based on
@@ -18,6 +20,7 @@ A single tunnel to a WireGuard peer has been working.
 
 The following ESP-IDF versions are supported:
 
+* **`esp-idf` `v5.5.x`**
 * `esp-idf` `master`
 * `esp-idf` `v4.2.x`
 * `esp-idf` `v4.3.x`
@@ -61,6 +64,7 @@ wg_config.allowed_ip = CONFIG_WG_LOCAL_IP_ADDRESS;
 wg_config.allowed_ip_mask = CONFIG_WG_LOCAL_IP_NETMASK;
 wg_config.endpoint = CONFIG_WG_PEER_ADDRESS;
 wg_config.port = CONFIG_WG_PEER_PORT;
+wg_config.netif_key = CONFIG_WG_IF_KEY;  // new: key of the interface (e.g. "WIFI_STA_DEF" (default) or "ETH_DEF").
 
 /* If the device is behind NAT or stateful firewall, set persistent_keepalive.
    persistent_keepalive is disabled by default */
