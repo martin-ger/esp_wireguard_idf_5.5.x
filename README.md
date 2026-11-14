@@ -47,7 +47,7 @@ Add the component to your project's `main/idf_component.yml`:
 dependencies:
   esp_wireguard:
     git: https://github.com/martin-ger/esp_wireguard_idf_5.5.x.git
-    version: v0.10.0
+    version: v0.10.1
 ```
 
 ## Usage
