@@ -978,7 +978,7 @@ static void wireguardif_tmr(void *arg) {
 		}
 	}
 
-	if (!link_up) {
+	if (!link_up && !device->link_always_up) {
 		// Clear the IF-UP flag on netif
 		netif_set_link_down(device->netif);
 	}
@@ -1049,6 +1049,7 @@ err_t wireguardif_init(struct netif *netif) {
 					if (device) {
 						device->netif = netif;
 						device->underlying_netif = underlying_netif;
+						device->link_always_up = init_data->link_always_up;
 						udp_bind_netif(udp, underlying_netif);
 
 						device->udp_pcb = udp;

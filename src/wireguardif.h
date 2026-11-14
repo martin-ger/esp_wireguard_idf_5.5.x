@@ -63,6 +63,9 @@ struct wireguardif_init_data {
 	struct netif *bind_netif;
 	// Optional: esp_netif interface key for the underlying netif (e.g. "WIFI_STA_DEF", "ETH_DEF"). NULL defaults to "WIFI_STA_DEF".
 	const char *netif_key;
+	// Optional: keep the netif link up while no peer has a session (server mode). Without it packets for
+	// the tunnel subnet follow the default route whenever no client is connected.
+	bool link_always_up;
 };
 
 struct wireguardif_peer {

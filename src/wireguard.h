@@ -209,6 +209,10 @@ struct wireguard_device {
 
 	struct netif *underlying_netif;
 
+	// Keep the netif link up even while no peer has a session (server mode), so that
+	// traffic for the tunnel subnet is dropped here instead of following the default route
+	bool link_always_up;
+
 	// Handshake load control - see WIREGUARD_LOAD_THRESHOLD
 	uint32_t load_window_millis;	// start of the current one-second window
 	uint16_t load_seen;				// handshake messages with valid mac1 in this window
