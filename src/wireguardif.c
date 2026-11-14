@@ -364,10 +364,12 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 							// 5. If the plaintext packet has not been dropped, it is inserted into the receive queue of the wg0 interface.
 							if (dest_ok) {
 								peer->rx_bytes += header_len;
-								// Send packet to be process by LWIP
-								ip_input(pbuf, device->netif);
-								// pbuf is owned by IP layer now
-								pbuf = NULL;
+								// Send packet to be process by LWIP - through netif->input (ip_input unless the
+								// application wrapped it) so tunnel traffic can be filtered like any other interface
+								if (device->netif->input(pbuf, device->netif) == ERR_OK) {
+									// pbuf is owned by IP layer now
+									pbuf = NULL;
+								}
 							}
 						} else {
 							// IP header is corrupt or lied about packet size
