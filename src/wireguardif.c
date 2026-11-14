@@ -169,6 +169,7 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
 					now = wireguard_sys_now();
 					peer->last_tx = now;
 					keypair->last_tx = now;
+					peer->tx_bytes += unpadded_len;
 				}
 
 				pbuf_free(pbuf);
@@ -362,6 +363,7 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 
 							// 5. If the plaintext packet has not been dropped, it is inserted into the receive queue of the wg0 interface.
 							if (dest_ok) {
+								peer->rx_bytes += header_len;
 								// Send packet to be process by LWIP
 								ip_input(pbuf, device->netif);
 								// pbuf is owned by IP layer now

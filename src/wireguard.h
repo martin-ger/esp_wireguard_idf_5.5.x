@@ -196,6 +196,10 @@ struct wireguard_peer {
 
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;
+
+	// Inner (plaintext) IP bytes received from / sent to this peer since it was added
+	uint64_t rx_bytes;
+	uint64_t tx_bytes;
 };
 
 struct wireguard_device {
