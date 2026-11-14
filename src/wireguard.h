@@ -76,6 +76,13 @@ extern "C" {
 #define REKEY_TIMEOUT				(5)
 #define KEEPALIVE_TIMEOUT			(10)
 
+// Anti-replay window (RFC 6479): a bitmap of this many bits, of which all but one 32-bit word are usable as
+// window. Must be a power of two and a multiple of 32. Forwarding several flows over Wi-Fi reorders more than
+// the 32 packets the original window tolerated.
+#define WIREGUARD_REPLAY_BITS		(256)
+#define WIREGUARD_REPLAY_WORDS		(WIREGUARD_REPLAY_BITS / 32)
+#define WIREGUARD_REPLAY_WINDOW		(WIREGUARD_REPLAY_BITS - 32)
+
 struct wireguard_keypair {
 	bool valid;
 	bool initiator; // Did we initiate this session (send the initiation packet rather than sending the response packet)
@@ -91,7 +98,7 @@ struct wireguard_keypair {
 	uint32_t last_tx;
 	uint32_t last_rx;
 
-	uint32_t replay_bitmap;
+	uint32_t replay_bitmap[WIREGUARD_REPLAY_WORDS];
 	uint64_t replay_counter;
 
 	uint32_t local_index; // This is the index we generated for our end

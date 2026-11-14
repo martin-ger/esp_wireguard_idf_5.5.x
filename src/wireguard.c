@@ -328,48 +328,48 @@ static void wireguard_kdf3(uint8_t *tau1, uint8_t *tau2, uint8_t *tau3, const ui
 }
 
 bool wireguard_check_replay(struct wireguard_keypair *keypair, uint64_t seq) {
-	// Implementation of packet replay window - as per RFC2401
-	// Adapted from code in Appendix C at https://tools.ietf.org/html/rfc2401
-	uint64_t diff;
+	// Sliding window anti-replay as per RFC 6479 (the algorithm the Linux implementation uses)
+	// The bitmap is a ring of 32-bit words indexed by the upper bits of the packet number, so advancing the window
+	// only clears whole words instead of shifting the bitmap
+	uint32_t index;
+	uint32_t index_current;
+	uint32_t top;
+	uint32_t bit;
 	bool result = false;
-	size_t ReplayWindowSize = sizeof(keypair->replay_bitmap) * CHAR_BIT; // 32 bits
 
-	// WireGuard data packet counter starts from 0 but algorithm expects packet numbers to start from 1
+	// WireGuard data packet counter starts from 0 but the window treats 0 as "nothing received yet"
 	seq++;
 
 	if (seq != 0) {
-		if (seq > keypair->replay_counter) {
-			// new larger sequence number
-			diff = seq - keypair->replay_counter;
-			if (diff < ReplayWindowSize) {
-				// In window
-				keypair->replay_bitmap <<= diff;
-				// set bit for this packet
-				keypair->replay_bitmap |= 1;
-			} else {
-				// This packet has a "way larger"
-				keypair->replay_bitmap = 1;
-			}
-			keypair->replay_counter = seq;
-			// larger is good
-			result = true;
-		} else {
-			diff = keypair->replay_counter - seq;
-			if (diff < ReplayWindowSize) {
-				if (keypair->replay_bitmap & ((uint32_t)1 << diff)) {
-					// already seen
-				} else {
-					// mark as seen
-					keypair->replay_bitmap |= ((uint32_t)1 << diff);
-					// out of order but good
-					result = true;
+		if ((seq + WIREGUARD_REPLAY_WINDOW) >= keypair->replay_counter) {
+			index = (uint32_t)(seq >> 5);
+			if (seq > keypair->replay_counter) {
+				// New highest packet number - clear the words the window has moved over
+				index_current = (uint32_t)(keypair->replay_counter >> 5);
+				top = index - index_current;
+				if (top > WIREGUARD_REPLAY_WORDS) {
+					top = WIREGUARD_REPLAY_WORDS;
 				}
-			} else {
-				// too old or wrapped
+				while (top > 0) {
+					keypair->replay_bitmap[(top + index_current) & (WIREGUARD_REPLAY_WORDS - 1)] = 0;
+					top--;
+				}
+				keypair->replay_counter = seq;
 			}
+			index &= (WIREGUARD_REPLAY_WORDS - 1);
+			bit = (uint32_t)1 << (seq & 31);
+			if (keypair->replay_bitmap[index] & bit) {
+				// already seen
+			} else {
+				// mark as seen
+				keypair->replay_bitmap[index] |= bit;
+				result = true;
+			}
+		} else {
+			// too old - behind the window
 		}
 	} else {
-		// first == 0 or wrapped
+		// wrapped
 	}
 	return result;
 }
@@ -511,7 +511,7 @@ void wireguard_start_session(struct wireguard_peer *peer, bool initiator) {
 		wireguard_kdf2(new_keypair.receiving_key, new_keypair.sending_key, handshake->chaining_key, NULL, 0);
 	}
 
-	new_keypair.replay_bitmap = 0;
+	memset(new_keypair.replay_bitmap, 0, sizeof(new_keypair.replay_bitmap));
 	new_keypair.replay_counter = 0;
 
 	new_keypair.last_tx = 0;
