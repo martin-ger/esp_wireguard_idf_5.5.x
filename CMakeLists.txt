@@ -1,5 +1,4 @@
-idf_component_register(
-    SRCS "src/crypto.c"
+set(srcs "src/crypto.c"
          "src/wireguard.c"
          "src/wireguardif.c"
          "src/wireguard-platform.c"
@@ -9,7 +8,14 @@ idf_component_register(
          "src/crypto/refc/poly1305-donna.c"
          "src/crypto/refc/x25519.c"
          "src/esp_wireguard.c"
-         "src/nacl/crypto_scalarmult/curve25519/ref/smult.c"
+         "src/nacl/crypto_scalarmult/curve25519/ref/smult.c")
+
+if(CONFIG_WIREGUARD_SERVER)
+    list(APPEND srcs "src/esp_wireguard_server.c")
+endif()
+
+idf_component_register(
+    SRCS ${srcs}
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "src"
     REQUIRES esp_netif lwip mbedtls)

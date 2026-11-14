@@ -9,8 +9,16 @@ choice WIREGUARD_ESP_ADAPTER_SELECTION
         bool "ESP-NETIF"
 endchoice
 
+config WIREGUARD_SERVER
+    bool "Server API"
+    default n
+    help
+        Build esp_wireguard_server.h: one interface that accepts several
+        peers connecting in, with per-peer statistics and key generation.
+
 config WIREGUARD_MAX_PEERS
     int "Max number of peers"
+    default 8 if WIREGUARD_SERVER
     default 1
 
 config WIREGUARD_MAX_SRC_IPS

@@ -93,6 +93,52 @@ err = esp_wireguard_disconnect(&ctx);
 
 See examples at [examples](examples).
 
+## Server mode
+
+With `CONFIG_WIREGUARD_SERVER` (`[Component config]` -> `[WireGuard]` ->
+`Server API`), `esp_wireguard_server.h` provides a WireGuard server: one
+interface that listens on a UDP port and accepts several peers without a
+configured endpoint. Peers connect in; the server never dials out. The option
+also raises the default of `CONFIG_WIREGUARD_MAX_PEERS` to 8.
+
+```c
+#include <esp_wireguard_server.h>
+
+esp_wireguard_server_config_t cfg = {
+    .private_key = server_private_key,   /* base64 */
+    .listen_port = 51820,
+    .address = ipaddr_addr("10.8.0.1"),  /* tunnel address, network byte order */
+    .netmask = ipaddr_addr("255.255.255.0"),
+    .netif_key = "WIFI_STA_DEF",         /* interface to listen on */
+};
+err = esp_wireguard_server_start(&cfg);
+
+esp_wireguard_server_peer_t peer = {
+    .public_key = client_public_key,     /* base64 */
+    .allowed_ip = ipaddr_addr("10.8.0.2"),
+};
+err = esp_wireguard_server_add_peer(&peer);
+```
+
+- All functions that touch the interface run their work on the lwIP tcpip
+  thread, so call them from any task except that one.
+- `esp_wireguard_server_get_peer_stats()` returns the session state, the last
+  endpoint, the handshake age, inner byte counters, and the TAI64N timestamp
+  of the newest accepted handshake. Persist the timestamp and pass it back in
+  `esp_wireguard_server_peer_t` after a reboot, otherwise a recorded
+  handshake initiation can be replayed once.
+- `esp_wireguard_server_get_stats()` counts rejected handshakes: from keys
+  that are not a configured peer (also logged as a warning, at most once
+  every 10 s), and forged or corrupt ones.
+- `esp_wireguard_generate_private_key()` and `esp_wireguard_public_key()`
+  create key pairs on the device.
+- The netif is available from `esp_wireguard_server_netif()`. Its link stays
+  up while no peer is connected, so the tunnel subnet never follows the
+  default route. Routing or NAT between the tunnel and other interfaces is up
+  to the application.
+- The server and the client API must not use the same underlying interface
+  and port at the same time.
+
 ## IPv6 support
 
 Enable `CONFIG_LWIP_IPV6` under `lwip` component in `menuconfig`.
