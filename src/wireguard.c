@@ -567,7 +567,36 @@ uint8_t wireguard_get_message_type(const uint8_t *data, size_t len) {
 	return result;
 }
 
+// Count an initiation from a static key that is not a configured peer, and warn at most once per
+// WIREGUARD_UNKNOWN_PEER_LOG_INTERVAL. Usually a client whose peer was deleted or entered with the wrong key.
+// Kept out of line so the key buffer does not add to the stack of the handshake path.
+static void __attribute__((noinline)) wireguard_reject_unknown_peer(struct wireguard_device *device, const uint8_t *public_key) {
+	char key[48];
+	size_t key_len = sizeof(key);
+
+	device->rejected_unknown_peer++;
+	if (device->unknown_peer_logged && !wireguard_expired(device->unknown_peer_log_millis, WIREGUARD_UNKNOWN_PEER_LOG_INTERVAL)) {
+		device->unknown_peer_suppressed++;
+		return;
+	}
+	if (!wireguard_base64_encode(public_key, WIREGUARD_PUBLIC_KEY_LEN, key, &key_len)) {
+		key[0] = '\0';
+	}
+	if (device->unknown_peer_suppressed > 0) {
+		ESP_LOGW(TAG, "handshake from unknown peer %s (%lu more suppressed)", key, (unsigned long)device->unknown_peer_suppressed);
+	} else {
+		ESP_LOGW(TAG, "handshake from unknown peer %s", key);
+	}
+	device->unknown_peer_logged = true;
+	device->unknown_peer_log_millis = wireguard_sys_now();
+	device->unknown_peer_suppressed = 0;
+}
+
 struct wireguard_peer *wireguard_process_initiation_message(struct wireguard_device *device, struct message_handshake_initiation *msg) {
+	// Only a message from a key that is not a configured peer is logged (rate limited, see
+	// wireguard_reject_unknown_peer); the other failures need a forged or corrupt message and are only counted.
+	// Anyone who knows our public key can trigger them, and logging from the tcpip thread at that rate would
+	// itself be a load problem.
 	struct wireguard_peer *ret_peer = NULL;
 	struct wireguard_peer *peer = NULL;
 	struct wireguard_handshake *handshake;
@@ -651,16 +680,19 @@ struct wireguard_peer *wireguard_process_initiation_message(struct wireguard_dev
 						// Ignore
 					}
 				} else {
-					ESP_LOGE(TAG, "wireguard_process_initiation_message: failed to decrypt");
+					device->rejected_invalid++;
+					ESP_LOGD(TAG, "wireguard_process_initiation_message: failed to decrypt");
 				}
 			} else {
-				ESP_LOGE(TAG, "peer not found");
+				wireguard_reject_unknown_peer(device, s);
 			}
 		} else {
-			ESP_LOGE(TAG, "Failed to decrypt");
+			device->rejected_invalid++;
+			ESP_LOGD(TAG, "Failed to decrypt");
 		}
 	} else {
-		ESP_LOGE(TAG, "Bad X25519");
+		device->rejected_invalid++;
+		ESP_LOGD(TAG, "Bad X25519");
 	}
 
 	crypto_zero(key, sizeof(key));

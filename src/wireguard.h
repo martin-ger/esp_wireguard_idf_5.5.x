@@ -94,6 +94,9 @@ extern "C" {
 // Hard cap on cookie replies per second, so the device cannot be used to flood a spoofed source
 #define WIREGUARD_MAX_COOKIES_PER_SECOND	(20)
 
+// Minimum seconds between two "handshake from unknown peer" warnings (the ones in between are counted)
+#define WIREGUARD_UNKNOWN_PEER_LOG_INTERVAL	(10)
+
 struct wireguard_keypair {
 	bool valid;
 	bool initiator; // Did we initiate this session (send the initiation packet rather than sending the response packet)
@@ -209,6 +212,15 @@ struct wireguard_device {
 	uint16_t load_cookies;			// cookie replies sent in this window
 	bool under_load;
 	uint32_t under_load_millis;		// last time the threshold was exceeded
+
+	// Handshake initiations rejected after passing the mac checks, since the device was created
+	uint32_t rejected_unknown_peer;	// valid message, but the sender's static key is not a configured peer
+	uint32_t rejected_invalid;		// forged or corrupt: bad ephemeral key or failed decryption
+
+	// Rate limit of the unknown peer warning
+	bool unknown_peer_logged;		// a warning was printed at unknown_peer_log_millis
+	uint32_t unknown_peer_log_millis;
+	uint32_t unknown_peer_suppressed;	// rejections since then that were not logged
 
 	uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];
 	uint8_t private_key[WIREGUARD_PRIVATE_KEY_LEN];
