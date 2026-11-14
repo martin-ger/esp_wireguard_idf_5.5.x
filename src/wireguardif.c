@@ -170,6 +170,9 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
 					peer->last_tx = now;
 					keypair->last_tx = now;
 					peer->tx_bytes += unpadded_len;
+					if ((unpadded_len > 0) && (peer->data_unanswered_millis == 0)) {
+						peer->data_unanswered_millis = (now != 0) ? now : 1;
+					}
 				}
 
 				pbuf_free(pbuf);
@@ -228,6 +231,7 @@ static void wireguardif_process_response_message(struct wireguard_device *device
 		// Packet is good
 		// Update the peer location
 		update_peer_addr(peer, addr, port);
+		peer->data_unanswered_millis = 0;
 
 		wireguard_start_session(peer, true);
 		wireguardif_send_keepalive(device, peer);
@@ -316,6 +320,7 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					now = wireguard_sys_now();
 					keypair->last_rx = now;
 					peer->last_rx = now;
+					peer->data_unanswered_millis = 0;
 
 					// Check to see if we should rekey
 					if (keypair->initiator && wireguard_expired(keypair->keypair_millis, REJECT_AFTER_TIME - peer->keepalive_interval - REKEY_TIMEOUT)) {
@@ -636,6 +641,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 				if (peer) {
 					// Update the peer location
 					update_peer_addr(peer, addr, port);
+					peer->data_unanswered_millis = 0;
 
 					// Send back a handshake response
 					wireguardif_send_handshake_response(device, peer);
@@ -710,6 +716,7 @@ static err_t wireguard_start_handshake(struct netif *netif, struct wireguard_pee
 		}
 		pbuf_free(pbuf);
 		peer->send_handshake = false;
+		peer->data_unanswered_millis = 0;
 		peer->last_initiation_tx = wireguard_sys_now();
 		memcpy(peer->handshake_mac1, msg.mac1, WIREGUARD_COOKIE_LEN);
 		peer->handshake_mac1_valid = true;
@@ -888,6 +895,9 @@ static bool should_send_initiation(struct wireguard_peer *peer) {
 		} else if (peer->curr_keypair.valid && !peer->curr_keypair.initiator && wireguard_expired(peer->curr_keypair.keypair_millis, REJECT_AFTER_TIME - peer->keepalive_interval)) {
 			result = true;
 		} else if (!peer->curr_keypair.valid && peer->active) {
+			result = true;
+		} else if ((peer->data_unanswered_millis != 0) && wireguard_expired(peer->data_unanswered_millis, KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)) {
+			// 6.2 Data sent but nothing received for Keepalive-Timeout + Rekey-Timeout
 			result = true;
 		}
 	}

@@ -197,6 +197,11 @@ struct wireguard_peer {
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;
 
+	// When the first data packet (not a keepalive) was sent since the last authenticated packet was received,
+	// 0 if none is waiting. Nothing received within KEEPALIVE_TIMEOUT + REKEY_TIMEOUT starts a new handshake
+	// (6.2): the other side may have lost the session, e.g. by a reboot.
+	uint32_t data_unanswered_millis;
+
 	// Inner (plaintext) IP bytes received from / sent to this peer since it was added
 	uint64_t rx_bytes;
 	uint64_t tx_bytes;
