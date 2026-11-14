@@ -441,6 +441,39 @@ static void wireguardif_send_handshake_response(struct wireguard_device *device,
 	}
 }
 
+// Account for one handshake message that passed the mac1 check and update the under-load state
+static void wireguardif_load_account(struct wireguard_device *device) {
+	uint32_t now = wireguard_sys_now();
+	if ((now - device->load_window_millis) >= 1000) {
+		device->load_window_millis = now;
+		device->load_seen = 0;
+		device->load_admitted = 0;
+		device->load_cookies = 0;
+	}
+	if (device->load_seen < UINT16_MAX) {
+		device->load_seen++;
+	}
+	if (device->load_seen > WIREGUARD_LOAD_THRESHOLD) {
+		device->under_load = true;
+		device->under_load_millis = now;
+	} else if (device->under_load && wireguard_expired(device->under_load_millis, WIREGUARD_LOAD_HOLD)) {
+		device->under_load = false;
+	}
+}
+
+static bool wireguardif_under_load(struct wireguard_device *device) {
+	return device->under_load || wireguard_is_under_load();
+}
+
+// Take one slot of the per-second budget of handshake messages that may reach the public key operations
+static bool wireguardif_load_admit(struct wireguard_device *device) {
+	if (device->load_admitted < WIREGUARD_MAX_HANDSHAKES_PER_SECOND) {
+		device->load_admitted++;
+		return true;
+	}
+	return false;
+}
+
 static size_t get_source_addr_port(const ip_addr_t *addr, u16_t port, uint8_t *buf, size_t buflen) {
 	size_t result = 0;
 
@@ -476,7 +509,13 @@ static void wireguardif_send_handshake_cookie(struct wireguard_device *device, c
 	struct pbuf *pbuf = NULL;
 	err_t err = ERR_OK;
 	uint8_t source_buf[18];
-	size_t source_len = get_source_addr_port(addr, port, source_buf, sizeof(source_buf));
+	size_t source_len;
+
+	if (device->load_cookies >= WIREGUARD_MAX_COOKIES_PER_SECOND) {
+		return;
+	}
+	device->load_cookies++;
+	source_len = get_source_addr_port(addr, port, source_buf, sizeof(source_buf));
 
 	wireguard_create_cookie_reply(device, &packet, mac1, index, source_buf, source_len);
 
@@ -500,7 +539,8 @@ static bool wireguardif_check_initiation_message(struct wireguard_device *device
 
 	if (wireguard_check_mac1(device, data, sizeof(struct message_handshake_initiation) - (2 * WIREGUARD_COOKIE_LEN), msg->mac1)) {
 		// mac1 is valid!
-		if (!wireguard_is_under_load()) {
+		wireguardif_load_account(device);
+		if (!wireguardif_under_load(device)) {
 			// If we aren't under load we only need mac1 to be correct
 			result = true;
 		} else {
@@ -515,6 +555,10 @@ static bool wireguardif_check_initiation_message(struct wireguard_device *device
 				// If the responder receives a message with a valid msg.mac1 yet with an invalid msg.mac2, and is under load, it may respond with a cookie reply message
 				wireguardif_send_handshake_cookie(device, msg->mac1, msg->sender, addr, port);
 			}
+		}
+		// Whatever the load state, never spend more than the per-second budget on public key operations
+		if (result && !wireguardif_load_admit(device)) {
+			result = false;
 		}
 
 	} else {
@@ -532,7 +576,8 @@ static bool wireguardif_check_response_message(struct wireguard_device *device, 
 
 	if (wireguard_check_mac1(device, data, sizeof(struct message_handshake_response) - (2 * WIREGUARD_COOKIE_LEN), msg->mac1)) {
 		// mac1 is valid!
-		if (!wireguard_is_under_load()) {
+		wireguardif_load_account(device);
+		if (!wireguardif_under_load(device)) {
 			// If we aren't under load we only need mac1 to be correct
 			result = true;
 		} else {
@@ -547,6 +592,10 @@ static bool wireguardif_check_response_message(struct wireguard_device *device, 
 				// If the responder receives a message with a valid msg.mac1 yet with an invalid msg.mac2, and is under load, it may respond with a cookie reply message
 				wireguardif_send_handshake_cookie(device, msg->mac1, msg->sender, addr, port);
 			}
+		}
+		// Whatever the load state, never spend more than the per-second budget on public key operations
+		if (result && !wireguardif_load_admit(device)) {
+			result = false;
 		}
 
 	} else {

@@ -83,6 +83,17 @@ extern "C" {
 #define WIREGUARD_REPLAY_WORDS		(WIREGUARD_REPLAY_BITS / 32)
 #define WIREGUARD_REPLAY_WINDOW		(WIREGUARD_REPLAY_BITS - 32)
 
+// Handshake load control (per device, counted over one-second windows)
+// More handshake messages with a valid mac1 than this in one second puts the device under load: from then on
+// a valid mac2 (cookie) is required, which proves the sender can receive at its source address
+#define WIREGUARD_LOAD_THRESHOLD	(5)
+// How long the device stays under load after the last second that exceeded the threshold
+#define WIREGUARD_LOAD_HOLD			(5)
+// Hard cap on handshake messages per second that are passed on to the public key operations
+#define WIREGUARD_MAX_HANDSHAKES_PER_SECOND	(10)
+// Hard cap on cookie replies per second, so the device cannot be used to flood a spoofed source
+#define WIREGUARD_MAX_COOKIES_PER_SECOND	(20)
+
 struct wireguard_keypair {
 	bool valid;
 	bool initiator; // Did we initiate this session (send the initiation packet rather than sending the response packet)
@@ -190,6 +201,14 @@ struct wireguard_device {
 	struct udp_pcb *udp_pcb;
 
 	struct netif *underlying_netif;
+
+	// Handshake load control - see WIREGUARD_LOAD_THRESHOLD
+	uint32_t load_window_millis;	// start of the current one-second window
+	uint16_t load_seen;				// handshake messages with valid mac1 in this window
+	uint16_t load_admitted;			// of those, passed on for processing
+	uint16_t load_cookies;			// cookie replies sent in this window
+	bool under_load;
+	uint32_t under_load_millis;		// last time the threshold was exceeded
 
 	uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];
 	uint8_t private_key[WIREGUARD_PRIVATE_KEY_LEN];
