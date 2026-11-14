@@ -1,52 +1,66 @@
 # `esp_wireguard`, WireGuard Implementation for ESP-IDF
 
-**Added hack to get it to work on ESP IDF 5.5.x**
-
-**Added option to select other interfaces than WIFI_STA**
-
-This is an implementation of the [WireGuard&reg;](https://www.wireguard.com/)
-for ESP-IDF, based on
+An implementation of [WireGuard&reg;](https://www.wireguard.com/) for
+ESP-IDF, based on
 [WireGuard Implementation for lwIP](https://github.com/smartalock/wireguard-lwip).
 
-[![Build examples](https://github.com/trombik/esp_wireguard/actions/workflows/build.yml/badge.svg)](https://github.com/trombik/esp_wireguard/actions/workflows/build.yml)
+This is a fork of [trombik/esp_wireguard](https://github.com/trombik/esp_wireguard),
+maintained for ESP-IDF 5.5. Changes compared to the original:
+
+- Works with ESP-IDF 5.5.x (the WireGuard netif no longer confuses the
+  esp_netif IP event callback)
+- Selectable underlying interface (`netif_key`): Wi-Fi station, Ethernet, or
+  any other esp_netif
+- Server mode: one interface that accepts several peers connecting in (see
+  [Server mode](#server-mode))
+- Security and robustness fixes ported from wireguard-lwip
+  (GHSA-7grw-r329-8g8c and later), see [Security](#security)
+- Anti-replay window of 256 packets (RFC 6479) instead of 32
+- Handshake load control with cookies and rate limits
+- Per-peer traffic counters; decrypted packets pass `netif->input`, so
+  applications can filter tunnel traffic like that of any other interface
 
 ## Status
 
-The code is alpha.
+The client (a single tunnel to one peer) is in daily use, among
+others in [esp32_nat_router](https://github.com/martin-ger/esp32_nat_router)
+as a VPN uplink over Wi-Fi and Ethernet.
 
-A single tunnel to a WireGuard peer has been working.
+Server mode is new in 0.10.0.
+
+IPv6 inside the tunnel is not supported yet (see [IPv6](#ipv6)).
 
 ## Supported ESP-IDF versions and targets
 
-The following ESP-IDF versions are supported:
+Developed and tested with **ESP-IDF v5.5.x** on `esp32`, `esp32s3`,
+`esp32c3`, `esp32c5` and `esp32c6`.
 
-* **`esp-idf` `v5.5.x`**
-* `esp-idf` `master`
-* `esp-idf` `v4.2.x`
-* `esp-idf` `v4.3.x`
-* `esp-idf` `v4.4.x`
-* ESP8266 RTOS SDK `v3.4`
+The original project also supported ESP-IDF v4.2 to v4.4 and the ESP8266 RTOS
+SDK v3.4 (`TCP/IP Adapter`). That code is still there but is not tested in this
+fork. Server mode requires ESP-IDF 5.
 
-The following targets are supported:
+## Installation
 
-* `esp32`
-* `esp32s2`
-* `esp32c3`
-* `esp8266`
+Add the component to your project's `main/idf_component.yml`:
+
+```yaml
+dependencies:
+  esp_wireguard:
+    git: https://github.com/martin-ger/esp_wireguard_idf_5.5.x.git
+    version: v0.10.0
+```
 
 ## Usage
 
-In `menuconfig` under `WireGuard`, choose a TCP/IP adapter. The default is
-`ESP-NETIF`. SDKs older than `esp-idf` `v4.1`, including ESP8266 RTOS SDK v3.4
-requires `TCP/IP Adapter`.
-
-Both peers must have synced time. The library does not sync time.
+Both peers must have synced time: the handshake carries a timestamp, and a
+peer rejects initiations that are not newer than the last one it accepted.
+The library does not sync time (use SNTP).
 
 A working network interface is required.
 
-Create WireGuard configuration, `wireguard_config_t`. Use
-`ESP_WIREGUARD_CONFIG_DEFAULT` to initialize `wireguard_config_t` variable.
-Create `wireguard_ctx_t`.  Pass the variables to `esp_wireguard_init()`. Then,
+Create a WireGuard configuration, `wireguard_config_t`. Use
+`ESP_WIREGUARD_CONFIG_DEFAULT` to initialize the `wireguard_config_t` variable.
+Create `wireguard_ctx_t`. Pass the variables to `esp_wireguard_init()`. Then,
 call `esp_wireguard_connect()`. Call `esp_wireguard_disconnect()` to
 disconnect from the peer (and destroy the WireGuard interface).
 
@@ -60,21 +74,22 @@ wireguard_config_t wg_config = ESP_WIREGUARD_CONFIG_DEFAULT();
 wg_config.private_key = CONFIG_WG_PRIVATE_KEY;
 wg_config.listen_port = CONFIG_WG_LOCAL_PORT;
 wg_config.public_key = CONFIG_WG_PEER_PUBLIC_KEY;
+wg_config.preshared_key = NULL;               /* optional, base64 */
 wg_config.allowed_ip = CONFIG_WG_LOCAL_IP_ADDRESS;
 wg_config.allowed_ip_mask = CONFIG_WG_LOCAL_IP_NETMASK;
 wg_config.endpoint = CONFIG_WG_PEER_ADDRESS;
 wg_config.port = CONFIG_WG_PEER_PORT;
-wg_config.netif_key = CONFIG_WG_IF_KEY;  // new: key of the interface (e.g. "WIFI_STA_DEF" (default) or "ETH_DEF").
+wg_config.netif_key = "WIFI_STA_DEF";         /* underlying interface, e.g. "ETH_DEF"; NULL = "WIFI_STA_DEF" */
 
 /* If the device is behind NAT or stateful firewall, set persistent_keepalive.
    persistent_keepalive is disabled by default */
-// wg_config.persistent_keepalive = 10;
+// wg_config.persistent_keepalive = 25;
 
 wireguard_ctx_t ctx = {0};
 err = esp_wireguard_init(&wg_config, &ctx);
 
-/* start establishing the link. after this call, esp_wireguard start
-   establishing connection. */
+/* start establishing the link. after this call, esp_wireguard starts
+   establishing the connection. */
 err = esp_wireguard_connect(&ctx);
 
 /* after some time, see if the link is up. note that it takes some time to
@@ -82,16 +97,17 @@ err = esp_wireguard_connect(&ctx);
 err = esp_wireguardif_peer_is_up(&ctx);
 if (err == ESP_OK) {
     /* the link is up */
-else {
+} else {
     /* the link is not up */
 }
+
+/* optional: route all traffic through the tunnel */
+err = esp_wireguard_set_default(&ctx);
 
 /* do something */
 
 err = esp_wireguard_disconnect(&ctx);
 ```
-
-See examples at [examples](examples).
 
 ## Server mode
 
@@ -139,40 +155,66 @@ err = esp_wireguard_server_add_peer(&peer);
 - The server and the client API must not use the same underlying interface
   and port at the same time.
 
-## IPv6 support
+## Security
+
+On top of the WireGuard protocol itself:
+
+- **Replays**: data packets are checked against a 256-bit sliding window
+  (RFC 6479) before they can update the peer's endpoint or session state.
+  Handshake initiations must carry a newer timestamp than the last accepted
+  one (see the server notes above on persisting it).
+- **Handshake load**: handshakes with a valid mac1 are counted per second.
+  Above 5 per second the device requires a cookie (mac2) for 5 s, which
+  proves the sender receives at its source address. At most 10 handshakes per
+  second reach the public key operations, and at most 20 cookie replies per
+  second are sent.
+- **Logging**: a handshake from an unknown key is logged as a warning at most
+  once every 10 s; forged or corrupt handshakes are only logged at debug
+  level, so they cannot flood the log from the tcpip thread.
+- **Key material** is wiped from the stack after use.
+
+## IPv6
 
 Enable `CONFIG_LWIP_IPV6` under `lwip` component in `menuconfig`.
 
-IPv6 support is alpha and probably broken. See also Known issues.
+IPv6 inside the tunnel is not supported: decrypted IPv6 packets are dropped
+until allowed-IPs filtering for IPv6 exists. An IPv6 endpoint as transport
+is untested. Dual stack (IPv4 and IPv6) is not supported (see trombik Issue
+#5); the first address of `endpoint` decides between IPv4 and IPv6 as
+transport, and that transport must be available.
 
 ## Driver configuration
 
 The driver configuration is under `[Component config]` -> `[WireGuard]`.
 
-Under `WIREGUARD_x25519_IMPLEMENTATION`, you may choose an implementation of
-scalar multiplication. The default is
-`WIREGUARD_x25519_IMPLEMENTATION_DEFAULT`, which is derived from
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `WIREGUARD_ESP_ADAPTER_SELECTION` | `ESP-NETIF` | `TCP/IP Adapter` only for SDKs older than ESP-IDF v4.1 and the ESP8266 RTOS SDK |
+| `WIREGUARD_SERVER` | off | Build the server API |
+| `WIREGUARD_MAX_PEERS` | 1 (8 with the server) | Peers per interface |
+| `WIREGUARD_MAX_SRC_IPS` | 2 | Allowed IP ranges per peer |
+| `MAX_INITIATIONS_PER_SECOND` | 2 | Accepted handshake initiations per peer and second |
+| `WIREGUARD_x25519_IMPLEMENTATION` | Default | Scalar multiplication implementation, see below |
+
+`WIREGUARD_x25519_IMPLEMENTATION_DEFAULT` is derived from
 [WireGuard Implementation for lwIP](https://github.com/smartalock/wireguard-lwip).
 `WIREGUARD_x25519_IMPLEMENTATION_NACL` uses
 [crypto_scalarmult()](https://nacl.cr.yp.to/scalarmult.html) from NaCL. Note
-that, with `WIREGUARD_x25519_IMPLEMENTATION_NACL`,
-some stack sizes must be increased.  In my test, 5KB for both
-`CONFIG_LWIP_TCPIP_TASK_STACK_SIZE`, and `CONFIG_MAIN_TASK_STACK_SIZE` is
-known to work on `ESP32-D0WD-V3`.
+that, with `WIREGUARD_x25519_IMPLEMENTATION_NACL`, some stack sizes must be
+increased. 5KB for both `CONFIG_LWIP_TCPIP_TASK_STACK_SIZE` and
+`CONFIG_MAIN_TASK_STACK_SIZE` is known to work on `ESP32-D0WD-V3`.
+
+The replay window and the handshake load limits are compile-time constants
+in `src/wireguard.h`.
 
 ## Known issues
 
-The implementation uses `LwIP` as TCP/IP protocol stack.
+The implementation uses `lwIP` as TCP/IP protocol stack.
 
-IPv6 support is not tested.  Dual stack (IPv4 and IPv6) is not supported (see
-Issue #5). The first address of `endpoint` is used to choose IPv4 or IPv6 as a
-transport. The chosen transport must be available and usable.
+IPv6 is not supported inside the tunnel, see [IPv6](#ipv6).
 
-The library assumes the interface is WiFi interface. Ethernet is not
-supported.
-
-Older `esp-idf` versions with `TCP/IP Adapter`, such as v4.1.x, should work,
-but there are others issues, not directly related to the library.
+Older `esp-idf` versions with `TCP/IP Adapter`, such as v4.1.x, may work, but
+are not tested in this fork.
 
 ## License
 
@@ -187,3 +229,5 @@ See [LICENSE](LICENSE) for details.
 * Kenta Ida (fuga@fugafuga.org)
 * Matthew Dempsky
 * D. J. Bernstein
+* Tomoyuki Sakurai (original `esp_wireguard`)
+* martin-ger (ESP-IDF 5.5 fork, server mode)
